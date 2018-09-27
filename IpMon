@@ -1,0 +1,133 @@
+#!/usr/bin/python
+
+# Copyright (c) 2018, Arista Networks, Inc.
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are
+# met:
+#  - Redistributions of source code must retain the above copyright notice,
+# this list of conditions and the following disclaimer.
+#  - Redistributions in binary form must reproduce the above copyright
+# notice, this list of conditions and the following disclaimer in the
+# documentation and/or other materials provided with the distribution.
+#  - Neither the name of Arista Networks nor the names of its
+# contributors may be used to endorse or promote products derived from
+# this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL ARISTA NETWORKS
+# BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+# BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
+# OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
+# IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#
+#
+#    Written by:
+#       Rob Martin, Arista Networks
+#
+"""
+This EOS SDK script will monitor ICMP reachability to configured IPs 
+If certain amount of failures occur, it will trigger an email.
+"""
+
+import eossdk
+import syslog
+import sys
+import time
+from subprocess import call, PIPE
+
+__author__ = 'rmartin'
+__version__ = 1.0
+
+
+class IPMON(eossdk.AgentHandler,eossdk.TimeoutHandler):
+    def __init__(self,agentMgr):
+        eossdk.AgentHandler.__init__(self,agentMgr)
+        eossdk.TimeoutHandler.__init__(self,sdk.get_timeout_mgr())
+        self.tracer = eossdk.Tracer("EosSdkIPMonitor")
+        self.agentMgr_ = agentMgr
+        self.tracer.trace0("Constructed")
+        self.devices = []
+        self.EMAIL = ''
+        self.PING_THRESHOLD = 3 #Default for failed ping attempts
+        self.POLL_TIME = 10 #Default for timeout between pings in seconds
+    
+    def on_initialized(self): 
+        self.tracer.trace0("We are initialized!")
+        #self.agentMgr_.status_set("Current Failed Tests",str(self.ip_failed))
+        self.to_syslog('IPMON Agent Initialized')
+        for r1 in self.agentMgr_.agent_option_iter():
+            self.opt_name = r1
+            self.opt_value = self.agentMgr_.agent_option(r1)
+            self.on_agent_option(self.opt_name,self.opt_value)
+        self.on_timeout()
+
+    def ping_host(self,host,vrf='ns-MGMT'):
+        #Function to ping the IP address to locate
+        vrf_commands = ['sudo','ip','netns','exec']
+        base_commands = ['ping','-c1','-w1',host]
+        if vrf:
+            vrf_commands.append(vrf)
+            ping_commands = vrf_commands + base_commands
+        else:
+            ping_commands = base_commands
+        p_host = call(ping_commands,stdout=PIPE,stderr=PIPE)
+        return(p_host)
+
+    def to_syslog(self,sys_msg):
+        syslog.syslog("%%myIP-6-LOG: %s"%sys_msg)
+    
+    def on_agent_option(self,optionName, value):
+        if optionName == 'email':
+            self.email = value
+        elif optionName == 'threshold':
+            self.PING_THRESHOLD = int(value)
+        elif optionName == 'poll':
+            self.POLL_TIME = int(value)
+        else:
+            new_device = True
+            if not self.devices:
+                for r1 in self.devices:
+                    if optionName == r1['device']:
+                        new_device = False
+                if new_device:
+                    self.devices.append({'device':optionName,'ip':value,'failed':0,'last_fail':'','last_success':'','state':''})
+
+    def on_timeout(self):
+        #Time to wait until it retries to ping defined hosts
+        #Checks to make sure there are configured devices
+        if self.devices:
+            for host in self.devices:
+                ping_result = self.ping_host(host['ip'])
+                if ping_result:
+                    self.to_syslog('1: %s'%str(host))
+                    host['failed'] += 1
+                    host['last_fail'] = time.ctime()
+                    host['state'] = 'Unreachable'
+                    self.to_syslog('2: %s'%str(host))
+                    self.agentMgr_.status_set(host['device'],host['state'])
+                    self.to_syslog('%s on %s has Failed counter %s'%(host['device'],host['ip'],host['failed']))
+                else:
+                    host['failed'] = 0
+                    host['last_success'] = time.ctime()
+                    host['state'] = 'Reachable'
+                    self.agentMgr_.status_set(host['device'],host['state'])
+                    self.to_syslog('%s on %s is UP'%(host['device'],host['ip']))
+                if host['failed'] == self.PING_THRESHOLD:
+                    #Send email to email specified:
+                    self.to_syslog('%s on %s has failed 3 consecutive ping tests'%(host['device'],host['ip']))
+        #Start the poller timeout via EOS SDK
+        self.timeout_time_is(eossdk.now() + self.POLL_TIME)
+
+
+if __name__ == '__main__':
+    syslog.openlog('myIP-MON',0,syslog.LOG_LOCAL4)
+    sdk = eossdk.Sdk()
+    _ = IPMON(sdk.get_agent_mgr())
+    sdk.main_loop(sys.argv)
