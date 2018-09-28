@@ -4,7 +4,7 @@
 1. Copy `IpMon` and `profileIP` to `/mnt/flash/` on the switch
 2. Run the following command on the switch: 
 ```
-bash /mnt/flash/./profileBFD
+bash /mnt/flash/./profileIP
 ```
 3. In EOS config mode perform the following commands for basic functionality (see step #4 for further customization):
 ```
