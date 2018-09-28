@@ -1,5 +1,11 @@
 # eos-sdk-ip-monitor
 
+#### Version 1.1
+- Corrected an issue where the script only monitored the first device/IP address entered in, and ignores the remaining entered ones
+
+#### Version 1.0
+Inital release of the code.
+
 ## Switch Setup
 1. Copy `IpMon` and `profileIP` to `/mnt/flash/` on the switch
 2. Run the following command on the switch: 

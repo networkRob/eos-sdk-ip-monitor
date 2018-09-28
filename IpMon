@@ -43,7 +43,7 @@ import time
 from subprocess import call, PIPE, Popen
 
 __author__ = 'rmartin'
-__version__ = 1.0
+__version__ = 1.1
 
 all_devices = []
 
@@ -169,12 +169,15 @@ class IPMON(eossdk.AgentHandler,eossdk.TimeoutHandler):
                 self._to_syslog('Remove %s'%optionName)
                 self._remove_status(optionName)
             #Section to interate through and make sure it is a new device
-            if not all_devices:
+            if all_devices:
                 for r1 in all_devices:
                     if optionName == r1.device and r1.ip != '':
                         new_device = False
                 if new_device:
                     all_devices.append(deviceMON(optionName,value))
+            #If all_devices list is empty, add the device into the list
+            else:
+                all_devices.append(deviceMON(optionName,value))
 
     def on_timeout(self):
         #Time to wait until it retries to ping defined hosts
