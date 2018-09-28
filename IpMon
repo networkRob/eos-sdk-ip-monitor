@@ -61,14 +61,14 @@ class IPMON(eossdk.AgentHandler,eossdk.TimeoutHandler):
     def on_initialized(self): 
         self.tracer.trace0("We are initialized!")
         #self.agentMgr_.status_set("Current Failed Tests",str(self.ip_failed))
-        self.to_syslog('IPMON Agent Initialized')
+        self._to_syslog('IPMON Agent Initialized')
         for r1 in self.agentMgr_.agent_option_iter():
             self.opt_name = r1
             self.opt_value = self.agentMgr_.agent_option(r1)
             self.on_agent_option(self.opt_name,self.opt_value)
         self.on_timeout()
 
-    def ping_host(self,host,vrf='ns-MGMT'):
+    def _ping_host(self,host,vrf='ns-MGMT'):
         #Function to ping the IP address to locate
         vrf_commands = ['sudo','ip','netns','exec']
         base_commands = ['ping','-c1','-w1',host]
@@ -80,48 +80,85 @@ class IPMON(eossdk.AgentHandler,eossdk.TimeoutHandler):
         p_host = call(ping_commands,stdout=PIPE,stderr=PIPE)
         return(p_host)
 
-    def to_syslog(self,sys_msg):
+    def _to_syslog(self,sys_msg):
         syslog.syslog("%%myIP-6-LOG: %s"%sys_msg)
     
+    def _remove_status(self,rem_device):
+        #Function to remove the old status and device from list
+        if self.devices:
+            for host in self.devices:
+                if host['device'] == rem_device:
+                    self.agentMgr_.status_del(host['status_msg'])
+                    self.devices.pop(self.devices.index(host))
+
     def on_agent_option(self,optionName, value):
+        #First check to see if options will override the defaults
         if optionName == 'email':
             self.email = value
         elif optionName == 'threshold':
             self.PING_THRESHOLD = int(value)
         elif optionName == 'poll':
             self.POLL_TIME = int(value)
+        #Section to evaluate devices to be monitored
         else:
             new_device = True
+            #Section to remove a device from monitoring
+            if not value:
+                self._to_syslog('Remove %s'%optionName)
+                self._remove_status(optionName)
+            #Section to interate through and make sure it is a new device
             if not self.devices:
                 for r1 in self.devices:
                     if optionName == r1['device']:
                         new_device = False
                 if new_device:
-                    self.devices.append({'device':optionName,'ip':value,'failed':0,'last_fail':'','last_success':'','state':''})
+                    self.devices.append({'device':optionName,'ip':value,'failed':0,'first_fail':'','first_success':'','status_msg':''})
 
     def on_timeout(self):
         #Time to wait until it retries to ping defined hosts
         #Checks to make sure there are configured devices
         if self.devices:
             for host in self.devices:
-                ping_result = self.ping_host(host['ip'])
+                #Ping the remote device
+                ping_result = self._ping_host(host['ip'])
+                #If host is un-reachable
                 if ping_result:
-                    self.to_syslog('1: %s'%str(host))
-                    host['failed'] += 1
-                    host['last_fail'] = time.ctime()
-                    host['state'] = 'Unreachable'
-                    self.to_syslog('2: %s'%str(host))
-                    self.agentMgr_.status_set(host['device'],host['state'])
-                    self.to_syslog('%s on %s has Failed counter %s'%(host['device'],host['ip'],host['failed']))
+                    old_count = host['failed']
+                    host['failed'] = old_count + 1
+                    #If first failure, grab the current date and time
+                    if old_count == 0:
+                        host['first_fail'] = time.ctime()
+                    #Delete out the current status msg, so the show daemon output doesn't fill up
+                    if host['status_msg']:
+                        self.agentMgr_.status_del(host['status_msg'])
+                        host['status_msg'] = ''
+                    #Set the daemon status output to when the device has been down since ie 1st fail
+                    host['status_msg'] = "%s has been down since:"%(host['device'])
+                    self.agentMgr_.status_set(host['status_msg'],host['first_fail'])
+                    self._to_syslog('%s on %s has Failed counter %s'%(host['device'],host['ip'],host['failed']))
+                #Section if host is reachable via ping
                 else:
+                    #If it's the first success, set date and time
+                    if not host['first_success']:
+                        self._to_syslog('%s on %s is UP'%(host['device'],host['ip']))
+                        host['first_success'] = time.ctime()
+                    #If host previously failed, set new first success time and delete old status msg
+                    if host['failed'] > 0:
+                        self._to_syslog('%s on %s is UP'%(host['device'],host['ip']))
+                        host['first_success'] = time.ctime()
+                    if host['status_msg']:
+                        self.agentMgr_.status_del(host['status_msg'])
+                        host['status_msg'] = ''
+                    #reset the host failed count to 0
                     host['failed'] = 0
-                    host['last_success'] = time.ctime()
-                    host['state'] = 'Reachable'
-                    self.agentMgr_.status_set(host['device'],host['state'])
-                    self.to_syslog('%s on %s is UP'%(host['device'],host['ip']))
+                    #Only set the up since status msg if it was previously failed, updates only once
+                    if not host['status_msg']:
+                        host['status_msg'] = "%s has been up since:"%(host['device'])
+                        self.agentMgr_.status_set(host['status_msg'],host['first_success'])
+                #Check if the total failed count is eq to the set threshold
                 if host['failed'] == self.PING_THRESHOLD:
                     #Send email to email specified:
-                    self.to_syslog('%s on %s has failed 3 consecutive ping tests'%(host['device'],host['ip']))
+                    self._to_syslog('%s on %s has failed 3 consecutive ping tests'%(host['device'],host['ip']))
         #Start the poller timeout via EOS SDK
         self.timeout_time_is(eossdk.now() + self.POLL_TIME)
 
