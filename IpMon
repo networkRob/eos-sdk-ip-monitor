@@ -43,7 +43,7 @@ import time
 from subprocess import call, PIPE, Popen
 
 __author__ = 'rmartin'
-__version__ = 1.1
+__version__ = 1.2
 
 all_devices = []
 
@@ -150,7 +150,7 @@ class IPMON(eossdk.AgentHandler,eossdk.TimeoutHandler):
     def on_agent_option(self,optionName, value):
         #First check to see if options will override the defaults
         if optionName == 'email':
-            self.email = value
+            self.EMAIL = value
         elif optionName == 'threshold':
             self.PING_THRESHOLD = int(value)
         elif optionName == 'poll':
