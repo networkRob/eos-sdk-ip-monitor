@@ -1,5 +1,8 @@
 # eos-sdk-ip-monitor
 
+#### Version 1.2
+- Corrected an incorrect setting of the email parameter.  It was causing email functionality to fail.
+
 #### Version 1.1
 - Corrected an issue where the script only monitored the first device/IP address entered in, and ignores the remaining entered ones
 
