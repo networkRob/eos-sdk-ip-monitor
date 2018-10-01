@@ -43,7 +43,7 @@ import time
 from subprocess import call, PIPE, Popen
 
 __author__ = 'rmartin'
-__version__ = 1.2
+__version__ = 1.3
 
 all_devices = []
 
@@ -105,7 +105,6 @@ class IPMON(eossdk.AgentHandler,eossdk.TimeoutHandler):
         dev_hostname = dev_hostname.replace('\n','')
         return(dev_hostname)
 
-
     def _send_email(self,msg):
         #Function to try and send an email alert if threshold has been reached
         email_cmds = ['email',self.EMAIL,'-s%s'%msg]
@@ -149,18 +148,46 @@ class IPMON(eossdk.AgentHandler,eossdk.TimeoutHandler):
 
     def on_agent_option(self,optionName, value):
         #First check to see if options will override the defaults
-        if optionName == 'email':
-            self.EMAIL = value
-        elif optionName == 'threshold':
-            self.PING_THRESHOLD = int(value)
-        elif optionName == 'poll':
-            self.POLL_TIME = int(value)
-        elif optionName == 'vrf':
-            if 'ns-' not in value:
-                value = 'ns-' + value
-            self.vrf = value
-        elif optionName == 'source':
-            self.intf = value
+        if optionName.lower() == 'email':
+            if value:
+                if self.EMAIL:
+                    self._to_syslog("Email address changed from %s to %s"%(self.EMAIL,value))
+                else:
+                    self._to_syslog("Email address changed from None to %s"%(value))
+                self.EMAIL = value
+            else:
+                self._to_syslog("Email address defaulted from %s to None"%self.EMAIL)
+                self.EMAIL = ''
+        elif optionName.lower() == 'threshold':
+            if value:
+                self._to_syslog("Ping Threshold value changed from %s to %s"%(self.PING_THRESHOLD,value))
+                self.PING_THRESHOLD = int(value)
+            else:
+                self._to_syslog("Ping Threshold value changed from %s to 3"%(self.PING_THRESHOLD))
+                self.PING_THRESHOLD = 3
+        elif optionName.lower() == 'poll':
+            if value:
+                self._to_syslog("Polling interval value changed from %s to %s"%(self.POLL_TIME,value))
+                self.POLL_TIME = int(value)
+            else:
+                self._to_syslog("Polling interval value changed from %s to 10"%(self.POLL_TIME))
+                self.POLL_TIME = 10
+        elif optionName.lower() == 'vrf':
+            if value:
+                if 'ns-' not in value:
+                    value = 'ns-' + value
+                self._to_syslog("VRF value changed from %s to %s"%(self.vrf,value))
+                self.vrf = value
+            else:
+                self._to_syslog("Polling interval value changed from %s to default"%(self.vrf))
+                self.vrf = 'default'
+        elif optionName.lower() == 'source':
+            if value:
+                self._to_syslog("Source Interface value changed from %s to %s"%(self.intf,value))
+                self.intf = value
+            else:
+                self._to_syslog("Source Interface value defaulted from %s to None"%(self.intf))
+                self.intf = ''
         #Section to evaluate devices to be monitored
         else:
             new_device = True
@@ -175,6 +202,10 @@ class IPMON(eossdk.AgentHandler,eossdk.TimeoutHandler):
                         new_device = False
                 if new_device:
                     all_devices.append(deviceMON(optionName,value))
+                else:
+                    for host in all_devices:
+                        if host.device == optionName:
+                            host.ip = value
             #If all_devices list is empty, add the device into the list
             else:
                 all_devices.append(deviceMON(optionName,value))
@@ -203,7 +234,7 @@ class IPMON(eossdk.AgentHandler,eossdk.TimeoutHandler):
                         #Set the daemon status output to when the device has been down since ie 1st fail
                         host.set_msg("%s has been DOWN since:"%(host.device))
                         self.agentMgr_.status_set(host.status_msg,host.first_fail)
-                        if host.failed < 3:
+                        if host.failed < self.PING_THRESHOLD:
                             self._to_syslog('%s on %s has Failed counter %s'%(host.device,host.ip,host.failed))
                         else:
                             self._to_syslog('%s on %s has Failed over %s times!'%(host.device,host.ip,self.PING_THRESHOLD))
@@ -230,10 +261,10 @@ class IPMON(eossdk.AgentHandler,eossdk.TimeoutHandler):
                     if host.failed == self.PING_THRESHOLD:
                         #Send email to email specified:
                         if self.EMAIL:
-                            self._send_email('ALERT FROM %s: %s on %s has failed 3 consecutive ping tests'%(self.hostname,host.device,host.ip))
+                            self._send_email('ALERT FROM %s: %s on %s has failed %s consecutive ping tests'%(self.hostname,host.device,host.ip,self.PING_THRESHOLD))
                         else:
                             self._to_syslog("Email is not configured to send alert")
-                        self._to_syslog('%s on %s has failed 3 consecutive ping tests'%(host.device,host.ip))
+                        self._to_syslog('%s on %s has failed %s consecutive ping tests'%(host.device,host.ip,self.PING_THRESHOLD))
         #Start the poller timeout via EOS SDK
         self.timeout_time_is(eossdk.now() + self.POLL_TIME)
 
