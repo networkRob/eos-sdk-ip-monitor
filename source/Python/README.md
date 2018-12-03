@@ -1,44 +1,53 @@
-# EOS SDK IP Monitor
+# EOS SDK IP Monitor - Python
 
-## Switch Setup
-### Install
-1. Copy `IpMon-x.x.x-x.swix` to `/mnt/flash/` on the switch or to the `flash:` directory.
-2. Copy and install he `.swix` file to the extensions directory from within EOS.  Below command output shows the copy and install process for the extension.
+#### Version 1.4
+Introduced a .swix install for the Python version of the agent.
+
+#### Version 1.3
+##### Features
+- Added logging outputs that shows when optional parameter options are updated/changed.  Showing previous value to new value.
 ```
-7280-rtr-01#copy flash:IpMon-1.4.0-1.swix extensions:
-Copy completed successfully.
-7280-rtr-01#show extensions
-Name                         Version/Release      Status      Extension
----------------------------- -------------------- ----------- ---------
-IpMon-1.4.0-1.swix           1.4.0/1              A, NI       1
-TerminAttr-1.5.0-1.swix      v1.5.0/1             A, I        24
-
-
-A: available | NA: not available | I: installed | NI: not installed | F: forced
-7280-rtr-01#extension IpMon-1.4.0-1.swix
-7280-rtr-01#show extensions
-Name                         Version/Release      Status      Extension
----------------------------- -------------------- ----------- ---------
-IpMon-1.4.0-1.swix           1.4.0/1              A, I        1
-TerminAttr-1.5.0-1.swix      v1.5.0/1             A, I        24
-
-
-A: available | NA: not available | I: installed | NI: not installed | F: forced
+Oct  1 12:28:29 veos-rtr-01 myIP-MON: %myIP-6-LOG: VRF value changed from default to ns-MGMT
 ```
-3. In order for the extension to be installed on-boot, enter the following command:
-```
-7280-rtr-01#copy extensions: boot-extensions
-```
-
-### IP Monitor Agent Configuration
-1. In EOS config mode perform the following commands for basic functionality (see step #4 for further customization):
+- Added functionality to reset optional parameters to default by performing a `no` command. Below are examples for resetting each optional parameter to default:
 ```
 config
 daemon IpMon
-exec /usr/bin/IpMon
+no poll
+no threshold
+no email
+no vrf
+no srouce
+end
+```
+
+##### Fixes
+- Corrected an issue where if an IP address was inputed incorrectly for a device, updating the IP address wouldn't take the new IP.
+- Corrected a logging issue where it would produe a `failed over X times` even though the failed count didn't reach that mark
+
+#### Version 1.2
+- Corrected an incorrect setting of the email parameter.  It was causing email functionality to fail.
+
+#### Version 1.1
+- Corrected an issue where the script only monitored the first device/IP address entered in, and ignores the remaining entered ones
+
+#### Version 1.0
+Inital release of the code.
+
+## Switch Setup
+1. Copy `IpMon` and `profileIP` to `/mnt/flash/` on the switch
+2. Run the following command on the switch: 
+```
+bash /mnt/flash/./profileIP
+```
+3. In EOS config mode perform the following commands for basic functionality (see step #4 for further customization):
+```
+config
+daemon IpMon
+exec /mnt/flash/IpMon
 no shutdown
 ```
-2. By default, the agent has the following default values in terms of polling:
+4. By default, the agent has the following default values in terms of polling:
 - Polling interval = 10 seconds
 - Trigger threshold = 3 consecutive failed attempts
 - VRF = default (VRF used on the switch by default)
@@ -71,7 +80,7 @@ option source value {source_intf}
 - ma1 --> Management1
 - vlan100 --> Vlan100
 
-3. In order for this agent to monitor IP addresses, the following commands will need to be taken:
+5. In order for this agent to monitor IP addresses, the following commands will need to be taken:
 ```
 config
 daemon IpMon
@@ -94,6 +103,11 @@ option email value test@domain.com
 option vrf value MGMT
 option source value vlan100
 no shutdown
+```
+6. To make this agent persist a reboot/power-cycle.  We will need to create a `rc.eos` file in the `/mnt/flash` directory of the switch.  The contents for `rc.eos` are as follows:
+```
+#!/bin/bash
+/mnt/flash/./profileIP
 ```
 
 #### Sample output of `show daemon IpMon`
